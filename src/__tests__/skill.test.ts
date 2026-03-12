@@ -44,6 +44,7 @@ describe('skill command', () => {
             expect(consoleSpy).toHaveBeenCalledWith('  codex')
             expect(consoleSpy).toHaveBeenCalledWith('  cursor')
             expect(consoleSpy).toHaveBeenCalledWith('  gemini')
+            expect(consoleSpy).toHaveBeenCalledWith('  openclaw')
         })
     })
 
@@ -151,6 +152,12 @@ describe('skills registry', () => {
         expect(installer?.name).toBe('gemini')
     })
 
+    it('returns openclaw installer', () => {
+        const installer = getInstaller('openclaw')
+        expect(installer).toBeDefined()
+        expect(installer?.name).toBe('openclaw')
+    })
+
     it('returns undefined for unknown agent', () => {
         const installer = getInstaller('unknown')
         expect(installer).toBeUndefined()
@@ -162,6 +169,7 @@ describe('skills registry', () => {
         expect(agents).toContain('codex')
         expect(agents).toContain('cursor')
         expect(agents).toContain('gemini')
+        expect(agents).toContain('openclaw')
     })
 })
 
@@ -200,6 +208,32 @@ describe('installer paths', () => {
             })
         })
     }
+
+    describe('openclaw', () => {
+        const installer = skillInstallers['openclaw']
+
+        it('has correct name and description', () => {
+            expect(installer.name).toBe('openclaw')
+            expect(installer.description).toBe('OpenClaw skill for Todoist CLI')
+        })
+
+        it('returns global path containing .openclaw/skills', () => {
+            const globalPath = installer.getInstallPath(false)
+            expect(globalPath).toContain('.openclaw')
+            expect(globalPath).toContain('skills')
+            expect(globalPath).toContain('todoist-cli')
+            expect(globalPath).toContain('SKILL.md')
+        })
+
+        it('returns local path rooted at cwd skills directory', () => {
+            const localPath = installer.getInstallPath(true)
+            expect(localPath).toContain(process.cwd())
+            expect(localPath).toContain('skills')
+            expect(localPath).toContain('todoist-cli')
+            expect(localPath).toContain('SKILL.md')
+            expect(localPath).not.toContain('.openclaw')
+        })
+    })
 
     it('generates skill file with YAML frontmatter', () => {
         const content = skillInstallers['claude-code'].generateContent()
@@ -272,6 +306,23 @@ describe('install detection', () => {
         await expect(installer.install(false, false)).rejects.toThrow(
             'fake-agent does not appear to be installed',
         )
+    })
+
+    it('allows custom install detection path for local installs', async () => {
+        const testDir = await mkdtemp(join(tmpdir(), 'skill-local-install-test-'))
+        const installer = createInstaller({
+            name: 'local-agent',
+            description: 'Local agent',
+            getInstallPath(local) {
+                return join(testDir, local ? 'skills' : '.local-agent', 'todoist-cli', 'SKILL.md')
+            },
+            getAgentInstallCheckPath(local) {
+                return local ? process.cwd() : join(process.cwd(), '.missing-agent')
+            },
+        })
+
+        await expect(installer.install(true, false)).resolves.toBeUndefined()
+        await rm(testDir, { recursive: true, force: true })
     })
 })
 

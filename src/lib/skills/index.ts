@@ -1,3 +1,5 @@
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { createInstaller } from './create-installer.js'
 import type { SkillInstaller } from './types.js'
 
@@ -21,6 +23,17 @@ export const skillInstallers: Record<string, SkillInstaller> = {
         name: 'gemini',
         description: 'Gemini CLI skill for Todoist CLI',
         dirName: '.gemini',
+    }),
+    openclaw: createInstaller({
+        name: 'openclaw',
+        description: 'OpenClaw skill for Todoist CLI',
+        getInstallPath(local) {
+            const base = local ? process.cwd() : homedir()
+            return join(base, local ? 'skills' : '.openclaw/skills', 'todoist-cli', 'SKILL.md')
+        },
+        getAgentInstallCheckPath(local) {
+            return local ? process.cwd() : join(homedir(), '.openclaw')
+        },
     }),
 }
 

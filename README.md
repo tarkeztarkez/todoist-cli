@@ -24,6 +24,8 @@ To also remove installed agent skills:
 td skill uninstall claude-code   # repeat for each installed agent
 ```
 
+Supported skill targets currently include `claude-code`, `codex`, `cursor`, `gemini`, and `openclaw`.
+
 ### Local Setup (for now)
 
 ```bash

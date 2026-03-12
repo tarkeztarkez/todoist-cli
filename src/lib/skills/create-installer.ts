@@ -4,10 +4,12 @@ import { dirname, join } from 'node:path'
 import { SKILL_CONTENT, SKILL_DESCRIPTION, SKILL_NAME } from './content.js'
 import type { SkillInstaller } from './types.js'
 
-interface InstallerConfig {
+export interface InstallerConfig {
     name: string
     description: string
-    dirName: string
+    getInstallPath?: (local: boolean) => string
+    getAgentInstallCheckPath?: (local: boolean) => string
+    dirName?: string
 }
 
 function generateSkillFile(): string {
@@ -22,8 +24,30 @@ description: ${SKILL_DESCRIPTION}
 
 export function createInstaller(config: InstallerConfig): SkillInstaller {
     function getInstallPath(local: boolean): string {
+        if (config.getInstallPath) {
+            return config.getInstallPath(local)
+        }
+
+        if (!config.dirName) {
+            throw new Error(`Installer ${config.name} is missing dirName or getInstallPath`)
+        }
+
         const base = local ? process.cwd() : homedir()
         return join(base, config.dirName, 'skills', 'todoist-cli', 'SKILL.md')
+    }
+
+    function getAgentInstallCheckPath(local: boolean): string {
+        if (config.getAgentInstallCheckPath) {
+            return config.getAgentInstallCheckPath(local)
+        }
+
+        if (!config.dirName) {
+            throw new Error(
+                `Installer ${config.name} is missing dirName or getAgentInstallCheckPath`,
+            )
+        }
+
+        return join(homedir(), config.dirName)
     }
 
     return {
@@ -46,7 +70,7 @@ export function createInstaller(config: InstallerConfig): SkillInstaller {
         },
 
         async install(local: boolean, force: boolean): Promise<void> {
-            const agentDir = join(homedir(), config.dirName)
+            const agentDir = getAgentInstallCheckPath(local)
             try {
                 await access(agentDir)
             } catch {
