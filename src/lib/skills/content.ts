@@ -13,6 +13,7 @@ Use this skill when the user wants to interact with their Todoist tasks.
 - \`td upcoming\` - Tasks due in next N days
 - \`td completed\` - Recently completed tasks
 - \`td auth login\` - Authenticate and store the token securely
+- \`td multi-auth add <email> <token>\` - Store an additional Todoist account
 - \`td task add "content"\` - Add a task
 - \`td task list\` - List tasks with filters
 - \`td task complete <ref>\` - Complete a task
@@ -52,6 +53,7 @@ Most list commands also support:
 - \`--progress-jsonl\` - Machine-readable progress events (JSONL to stderr)
 - \`-v, --verbose\` - Verbose output to stderr (repeat: -v info, -vv detail, -vvv debug, -vvvv trace)
 - \`--accessible\` - Add text labels to color-coded output (due:/deadline:/~ prefixes, ★ for favorites). Also: \`TD_ACCESSIBLE=1\`
+- \`--account <email>\` - Run any command against a stored Todoist account
 
 ## Authentication
 
@@ -60,6 +62,9 @@ td auth login                          # OAuth login; stores token in OS credent
 td auth token "your-token"            # Save a manual API token
 td auth status                         # Check whether auth works
 td auth logout                         # Remove the saved token
+td multi-auth add work@example.com "your-token"
+td multi-auth list
+td --account work@example.com today
 export TODOIST_API_TOKEN="your-token"  # Highest priority; overrides stored token
 \`\`\`
 
@@ -270,6 +275,11 @@ td auth status --json                         # JSON: { id, email, fullName }
 td auth login                                 # OAuth login
 td auth token <token>                         # Save API token
 td auth logout                                # Remove saved token
+td multi-auth add <email> <token>            # Save API token for a named account
+td multi-auth list                            # List stored accounts
+td multi-auth remove <email>                  # Remove named account
+td multi-auth default <email>                 # Set default account
+td --account <email> today                    # Run any command under a chosen account
 \`\`\`
 
 ### Stats

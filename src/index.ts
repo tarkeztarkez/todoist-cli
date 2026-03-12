@@ -2,6 +2,7 @@
 
 import { type Command, program } from 'commander'
 import packageJson from '../package.json' with { type: 'json' }
+import { setActiveAccount } from './lib/auth.js'
 import { initializeLogger } from './lib/logger.js'
 import { preloadMarkdown } from './lib/markdown.js'
 import { startEarlySpinner, stopEarlySpinner } from './lib/spinner.js'
@@ -14,13 +15,15 @@ program
     .option('--progress-jsonl [path]', 'Output progress events as JSONL to stderr or file')
     .option('-v, --verbose', 'Increase output verbosity (repeat up to 4x: -v, -vv, -vvv, -vvvv)')
     .option('--accessible', 'Add text labels to color-coded output (also: TD_ACCESSIBLE=1)')
+    .option('--account <email>', 'Run the command using the specified Todoist account')
     .addHelpText(
         'after',
         `
 Note for AI/LLM agents:
   Use "td task add" (not "td add") to create tasks with structured flags.
   Use --json or --ndjson flags for unambiguous, parseable output.
-  Default JSON shows essential fields; use --full for all fields.`,
+  Default JSON shows essential fields; use --full for all fields.
+  Use --account <email> to select a stored Todoist account for this run.`,
     )
 
 // Lazy command registry: [description, loader]
@@ -81,6 +84,10 @@ const commands: Record<string, [string, () => Promise<(p: Command) => void>]> = 
     auth: [
         'Manage authentication',
         async () => (await import('./commands/auth.js')).registerAuthCommand,
+    ],
+    'multi-auth': [
+        'Manage multiple stored Todoist accounts',
+        async () => (await import('./commands/multi-auth.js')).registerMultiAuthCommand,
     ],
     stats: [
         'View productivity stats and karma',
@@ -169,6 +176,11 @@ if (process.argv[2] === 'completion-server') {
 
 // Initialize verbose logger before parsing so it captures all -v flags
 initializeLogger()
+
+program.hook('preAction', (thisCommand, actionCommand) => {
+    const options = actionCommand.optsWithGlobals?.() ?? thisCommand.opts()
+    setActiveAccount(typeof options.account === 'string' ? options.account : undefined)
+})
 
 program
     .parseAsync()

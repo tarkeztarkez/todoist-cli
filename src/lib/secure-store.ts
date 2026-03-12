@@ -1,5 +1,5 @@
 const SERVICE_NAME = 'todoist-cli'
-const ACCOUNT_NAME = 'api-token'
+const DEFAULT_ACCOUNT_NAME = 'api-token'
 
 export const SECURE_STORE_DESCRIPTION = 'system credential manager'
 
@@ -16,10 +16,10 @@ export interface SecureStore {
     deleteSecret(): Promise<boolean>
 }
 
-export function createSecureStore(): SecureStore {
+export function createSecureStore(accountName = DEFAULT_ACCOUNT_NAME): SecureStore {
     return {
         async getSecret(): Promise<string | null> {
-            const entry = await getEntry()
+            const entry = await getEntry(accountName)
             try {
                 return (await entry.getPassword()) ?? null
             } catch (error) {
@@ -28,7 +28,7 @@ export function createSecureStore(): SecureStore {
         },
 
         async setSecret(secret: string): Promise<void> {
-            const entry = await getEntry()
+            const entry = await getEntry(accountName)
             try {
                 await entry.setPassword(secret)
             } catch (error) {
@@ -37,7 +37,7 @@ export function createSecureStore(): SecureStore {
         },
 
         async deleteSecret(): Promise<boolean> {
-            const entry = await getEntry()
+            const entry = await getEntry(accountName)
             try {
                 return await entry.deleteCredential()
             } catch (error) {
@@ -47,10 +47,10 @@ export function createSecureStore(): SecureStore {
     }
 }
 
-async function getEntry(): Promise<import('@napi-rs/keyring').AsyncEntry> {
+async function getEntry(accountName: string): Promise<import('@napi-rs/keyring').AsyncEntry> {
     try {
         const { AsyncEntry } = await import('@napi-rs/keyring')
-        return new AsyncEntry(SERVICE_NAME, ACCOUNT_NAME)
+        return new AsyncEntry(SERVICE_NAME, accountName)
     } catch (error) {
         throw toUnavailableError(error)
     }

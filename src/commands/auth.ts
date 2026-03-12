@@ -39,8 +39,8 @@ async function loginWithToken(token?: string): Promise<void> {
             return
         }
     }
-    const result = await saveApiToken(token.trim())
-    console.log(chalk.green('✓'), 'API token saved successfully!')
+    const result = await saveApiToken(token.trim(), { setAsDefault: true })
+    console.log(chalk.green('✓'), `API token saved successfully for ${result.account}!`)
     logTokenStorageResult(result, 'Token stored securely in the system credential manager')
 }
 
@@ -62,9 +62,9 @@ async function loginWithOAuth(): Promise<void> {
         console.log(chalk.dim('Exchanging code for token...'))
 
         const accessToken = await exchangeCodeForToken(code, codeVerifier)
-        const result = await saveApiToken(accessToken)
+        const result = await saveApiToken(accessToken, { setAsDefault: true })
 
-        console.log(chalk.green('✓'), 'Successfully logged in!')
+        console.log(chalk.green('✓'), `Successfully logged in as ${result.account}!`)
         logTokenStorageResult(result, 'Token stored securely in the system credential manager')
     } catch (error) {
         cleanup()
@@ -113,7 +113,11 @@ async function showStatus(options: { json?: boolean }): Promise<void> {
 
 async function logout(): Promise<void> {
     const result = await clearApiToken()
-    console.log(chalk.green('✓'), 'Logged out')
+    if (result.account) {
+        console.log(chalk.green('✓'), `Logged out ${result.account}`)
+    } else {
+        console.log(chalk.green('✓'), 'Logged out')
+    }
     logTokenStorageResult(result, 'Stored token removed from the system credential manager')
 }
 

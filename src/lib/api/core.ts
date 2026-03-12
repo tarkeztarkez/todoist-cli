@@ -11,7 +11,7 @@ import { getApiToken } from '../auth.js'
 import { getProgressTracker } from '../progress.js'
 import { withSpinner } from '../spinner.js'
 
-let apiClient: TodoistApi | null = null
+const apiClients = new Map<string, TodoistApi>()
 
 // Mapping of API method names to user-friendly spinner messages
 const API_SPINNER_MESSAGES: Record<string, { text: string; color?: 'blue' | 'green' | 'yellow' }> =
@@ -137,12 +137,16 @@ function analyzeAndEmitApiResponse(
 }
 
 export async function getApi(): Promise<TodoistApi> {
-    if (!apiClient) {
-        const token = await getApiToken()
-        const rawApi = new TodoistApi(token)
-        apiClient = createSpinnerWrappedApi(rawApi)
+    const token = await getApiToken()
+    const existingClient = apiClients.get(token)
+    if (existingClient) {
+        return existingClient
     }
-    return apiClient
+
+    const rawApi = new TodoistApi(token)
+    const client = createSpinnerWrappedApi(rawApi)
+    apiClients.set(token, client)
+    return client
 }
 
 export type Project = PersonalProject | WorkspaceProject
@@ -155,18 +159,20 @@ export function isPersonalProject(project: Project): project is PersonalProject 
     return !isWorkspaceProject(project)
 }
 
-let currentUserIdCache: string | null = null
+const currentUserIdCache = new Map<string, string>()
 
 export async function getCurrentUserId(): Promise<string> {
-    if (currentUserIdCache) return currentUserIdCache
+    const token = await getApiToken()
+    const cachedUserId = currentUserIdCache.get(token)
+    if (cachedUserId) return cachedUserId
     const api = await getApi()
     const user = await api.getUser()
-    currentUserIdCache = user.id
-    return currentUserIdCache
+    currentUserIdCache.set(token, user.id)
+    return user.id
 }
 
 export function clearCurrentUserCache(): void {
-    currentUserIdCache = null
+    currentUserIdCache.clear()
 }
 
 export async function completeTaskForever(taskId: string): Promise<void> {

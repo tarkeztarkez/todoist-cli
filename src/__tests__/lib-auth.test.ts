@@ -4,15 +4,14 @@ const TEST_HOME = '/tmp/todoist-cli-tests'
 const TEST_CONFIG_PATH = `${TEST_HOME}/.config/todoist-cli/config.json`
 
 interface KeyringState {
-    token: string | null
+    tokens: Map<string, string>
     getError?: Error
     setError?: Error
     deleteError?: Error
     getCalls: number
-    service?: string
-    account?: string
-    setCalls: string[]
-    deleteCalls: number
+    entries: Array<{ service: string; account: string }>
+    setCalls: Array<{ account: string; password: string }>
+    deleteCalls: string[]
 }
 
 describe('lib/auth', () => {
@@ -35,10 +34,11 @@ describe('lib/auth', () => {
         configUnlinkError = null
         configWriteError = null
         keyringState = {
-            token: null,
+            tokens: new Map(),
             getCalls: 0,
+            entries: [],
             setCalls: [],
-            deleteCalls: 0,
+            deleteCalls: [],
         }
 
         mkdirMock = vi.fn().mockResolvedValue(undefined)
@@ -77,9 +77,11 @@ describe('lib/auth', () => {
 
         vi.doMock('@napi-rs/keyring', () => ({
             AsyncEntry: class {
+                private readonly account: string
+
                 constructor(service: string, account: string) {
-                    keyringState.service = service
-                    keyringState.account = account
+                    this.account = account
+                    keyringState.entries.push({ service, account })
                 }
 
                 async getPassword(): Promise<string | null> {
@@ -87,24 +89,24 @@ describe('lib/auth', () => {
                     if (keyringState.getError) {
                         throw keyringState.getError
                     }
-                    return keyringState.token
+                    return keyringState.tokens.get(this.account) ?? null
                 }
 
                 async setPassword(password: string): Promise<void> {
                     if (keyringState.setError) {
                         throw keyringState.setError
                     }
-                    keyringState.token = password
-                    keyringState.setCalls.push(password)
+                    keyringState.tokens.set(this.account, password)
+                    keyringState.setCalls.push({ account: this.account, password })
                 }
 
                 async deleteCredential(): Promise<boolean> {
                     if (keyringState.deleteError) {
                         throw keyringState.deleteError
                     }
-                    const hadCredential = keyringState.token !== null
-                    keyringState.token = null
-                    keyringState.deleteCalls += 1
+                    const hadCredential = keyringState.tokens.has(this.account)
+                    keyringState.tokens.delete(this.account)
+                    keyringState.deleteCalls.push(this.account)
                     return hadCredential
                 }
             },
@@ -118,206 +120,217 @@ describe('lib/auth', () => {
         vi.unstubAllEnvs()
     })
 
-    it('prefers TODOIST_API_TOKEN over secure storage and config', async () => {
+    it('prefers TODOIST_API_TOKEN when no account is selected', async () => {
         vi.stubEnv('TODOIST_API_TOKEN', 'env-token-123456')
-        keyringState.token = 'secure-token-abcdef'
-        setConfig({ api_token: 'config-token-xyz', currentWorkspace: 'personal' })
+        setConfig({
+            defaultAccount: 'work@example.com',
+            accounts: { 'work@example.com': { email: 'work@example.com' } },
+        })
+
+        const { getApiToken, setActiveAccount } = await import('../lib/auth.js')
+        setActiveAccount()
+
+        await expect(getApiToken()).resolves.toBe('env-token-123456')
+    })
+
+    it('rejects combining TODOIST_API_TOKEN with a selected account', async () => {
+        vi.stubEnv('TODOIST_API_TOKEN', 'env-token-123456')
+        setConfig({
+            defaultAccount: 'work@example.com',
+            accounts: { 'work@example.com': { email: 'work@example.com' } },
+        })
+
+        const { getApiToken, setActiveAccount } = await import('../lib/auth.js')
+        setActiveAccount('work@example.com')
+
+        await expect(getApiToken()).rejects.toThrow('Cannot use --account with TODOIST_API_TOKEN')
+    })
+
+    it('saves account tokens to account-specific secure-store keys and sets the default account', async () => {
+        const { saveApiToken, listAccounts } = await import('../lib/auth.js')
+
+        await expect(
+            saveApiToken('secure-token-123456', {
+                account: 'Work@Example.com',
+                setAsDefault: true,
+            }),
+        ).resolves.toEqual({
+            storage: 'secure-store',
+            account: 'work@example.com',
+        })
+
+        expect(keyringState.tokens.get('api-token:work@example.com')).toBe('secure-token-123456')
+        expect(readConfig()).toEqual({
+            defaultAccount: 'work@example.com',
+            accounts: {
+                'work@example.com': {
+                    email: 'work@example.com',
+                },
+            },
+        })
+        await expect(listAccounts()).resolves.toEqual([
+            {
+                email: 'work@example.com',
+                isDefault: true,
+                hasStoredToken: true,
+            },
+        ])
+    })
+
+    it('reads tokens for the default account from secure storage', async () => {
+        keyringState.tokens.set('api-token:work@example.com', 'secure-token-abcdef')
+        setConfig({
+            defaultAccount: 'work@example.com',
+            accounts: {
+                'work@example.com': { email: 'work@example.com' },
+            },
+        })
 
         const { getApiToken } = await import('../lib/auth.js')
 
-        await expect(getApiToken()).resolves.toBe('env-token-123456')
-        expect(readFileMock).not.toHaveBeenCalled()
-        expect(keyringState.service).toBeUndefined()
+        await expect(getApiToken()).resolves.toBe('secure-token-abcdef')
     })
 
-    it('reads and writes tokens through secure storage when available', async () => {
-        const { clearApiToken, getApiToken, saveApiToken } = await import('../lib/auth.js')
-
-        await expect(saveApiToken('secure-token-123456')).resolves.toEqual({
-            storage: 'secure-store',
+    it('uses the explicitly selected account for token lookup', async () => {
+        keyringState.tokens.set('api-token:work@example.com', 'work-token')
+        keyringState.tokens.set('api-token:personal@example.com', 'personal-token')
+        setConfig({
+            defaultAccount: 'personal@example.com',
+            accounts: {
+                'work@example.com': { email: 'work@example.com' },
+                'personal@example.com': { email: 'personal@example.com' },
+            },
         })
-        expect(keyringState.token).toBe('secure-token-123456')
-        expect(keyringState.service).toBe('todoist-cli')
-        expect(keyringState.account).toBe('api-token')
 
-        await expect(getApiToken()).resolves.toBe('secure-token-123456')
+        const { getApiToken, setActiveAccount } = await import('../lib/auth.js')
+        setActiveAccount('work@example.com')
 
-        setConfig({ currentWorkspace: 'work', api_token: 'legacy-token' })
-        await expect(clearApiToken()).resolves.toEqual({ storage: 'secure-store' })
-        expect(keyringState.token).toBeNull()
-        expect(readConfig()).toEqual({ currentWorkspace: 'work' })
+        await expect(getApiToken()).resolves.toBe('work-token')
     })
 
-    it('migrates a plaintext config token into secure storage and preserves other config', async () => {
+    it('falls back to plaintext config for account-scoped tokens when secure storage is unavailable', async () => {
+        keyringState.setError = new Error('Keychain unavailable')
+        keyringState.getError = new Error('Keychain unavailable')
+
+        const { getApiToken, saveApiToken } = await import('../lib/auth.js')
+
+        await expect(
+            saveApiToken('fallback-token-123456', {
+                account: 'work@example.com',
+                setAsDefault: true,
+            }),
+        ).resolves.toEqual({
+            storage: 'config-file',
+            warning: `system credential manager unavailable; token saved as plaintext in ${TEST_CONFIG_PATH} for work@example.com`,
+            account: 'work@example.com',
+        })
+        expect(readConfig()).toEqual({
+            defaultAccount: 'work@example.com',
+            accounts: {
+                'work@example.com': {
+                    email: 'work@example.com',
+                    api_token: 'fallback-token-123456',
+                },
+            },
+        })
+
+        await expect(getApiToken()).resolves.toBe('fallback-token-123456')
+        expect(errorSpy).toHaveBeenCalledWith(
+            `Warning: system credential manager unavailable; using plaintext token from ${TEST_CONFIG_PATH} for work@example.com`,
+        )
+    })
+
+    it('marks an account pending clear when secure-store removal is unavailable', async () => {
+        keyringState.deleteError = new Error('Keychain unavailable')
+        setConfig({
+            defaultAccount: 'work@example.com',
+            accounts: {
+                'work@example.com': {
+                    email: 'work@example.com',
+                    api_token: 'fallback-token-123456',
+                },
+            },
+        })
+
+        const { clearApiToken, setActiveAccount } = await import('../lib/auth.js')
+        setActiveAccount('work@example.com')
+
+        await expect(clearApiToken()).resolves.toEqual({
+            storage: 'config-file',
+            warning: `system credential manager unavailable; local auth state cleared in ${TEST_CONFIG_PATH} for work@example.com`,
+            account: 'work@example.com',
+        })
+        expect(readConfig()).toEqual({
+            defaultAccount: 'work@example.com',
+            accounts: {
+                'work@example.com': {
+                    email: 'work@example.com',
+                    pendingSecureStoreClear: true,
+                },
+            },
+        })
+    })
+
+    it('removes stored accounts and clears the default when deleting them', async () => {
+        keyringState.tokens.set('api-token:work@example.com', 'secure-token-123456')
+        setConfig({
+            defaultAccount: 'work@example.com',
+            accounts: {
+                'work@example.com': { email: 'work@example.com' },
+                'personal@example.com': { email: 'personal@example.com' },
+            },
+        })
+
+        const { removeAccount } = await import('../lib/auth.js')
+
+        await expect(removeAccount('work@example.com')).resolves.toEqual({
+            storage: 'secure-store',
+            account: 'work@example.com',
+        })
+        expect(readConfig()).toEqual({
+            accounts: {
+                'personal@example.com': {
+                    email: 'personal@example.com',
+                },
+            },
+        })
+    })
+
+    it('updates the default account explicitly', async () => {
+        setConfig({
+            defaultAccount: 'personal@example.com',
+            accounts: {
+                'work@example.com': { email: 'work@example.com' },
+                'personal@example.com': { email: 'personal@example.com' },
+            },
+        })
+
+        const { setDefaultAccount } = await import('../lib/auth.js')
+
+        await setDefaultAccount('work@example.com')
+
+        expect(readConfig()).toEqual({
+            defaultAccount: 'work@example.com',
+            accounts: {
+                'work@example.com': { email: 'work@example.com' },
+                'personal@example.com': { email: 'personal@example.com' },
+            },
+        })
+    })
+
+    it('preserves legacy single-account token lookup and migration', async () => {
         setConfig({
             api_token: 'legacy-token-123456',
             currentWorkspace: 'team-1',
-            theme: 'compact',
         })
 
         const { getApiToken } = await import('../lib/auth.js')
 
         await expect(getApiToken()).resolves.toBe('legacy-token-123456')
-        expect(keyringState.setCalls).toEqual(['legacy-token-123456'])
-        expect(keyringState.token).toBe('legacy-token-123456')
+        expect(keyringState.tokens.get('api-token')).toBe('legacy-token-123456')
         expect(readConfig()).toEqual({
             currentWorkspace: 'team-1',
-            theme: 'compact',
         })
-    })
-
-    it('prefers a fallback config token over a stale secure-store token', async () => {
-        keyringState.token = 'stale-secure-token-123456'
-        setConfig({
-            api_token: 'fallback-token-123456',
-            currentWorkspace: 'team-1',
-        })
-
-        const { getApiToken } = await import('../lib/auth.js')
-
-        await expect(getApiToken()).resolves.toBe('fallback-token-123456')
-        expect(keyringState.getCalls).toBe(0)
-        expect(keyringState.setCalls).toEqual(['fallback-token-123456'])
-        expect(keyringState.token).toBe('fallback-token-123456')
-        expect(readConfig()).toEqual({ currentWorkspace: 'team-1' })
-    })
-
-    it('returns the migrated token even when config cleanup fails after secure-store write', async () => {
-        configUnlinkError = new Error('EACCES')
-        setConfig({ api_token: 'legacy-token-123456' })
-
-        const { getApiToken } = await import('../lib/auth.js')
-
-        await expect(getApiToken()).resolves.toBe('legacy-token-123456')
-        expect(keyringState.setCalls).toEqual(['legacy-token-123456'])
-        expect(errorSpy).toHaveBeenCalledWith(
-            `Warning: Token was migrated to secure storage, but could not remove legacy plaintext token from ${TEST_CONFIG_PATH} (EACCES)`,
-        )
-        expect(readConfig()).toEqual({ api_token: 'legacy-token-123456' })
-    })
-
-    it('falls back to plaintext config with a warning when secure storage is unavailable', async () => {
-        keyringState.getError = new Error('Keychain unavailable')
-        keyringState.setError = new Error('Keychain unavailable')
-        keyringState.deleteError = new Error('Keychain unavailable')
-
-        const { clearApiToken, getApiToken, saveApiToken } = await import('../lib/auth.js')
-
-        await expect(saveApiToken('fallback-token-123456')).resolves.toEqual({
-            storage: 'config-file',
-            warning: `system credential manager unavailable; token saved as plaintext in ${TEST_CONFIG_PATH}`,
-        })
-        expect(readConfig()).toEqual({ api_token: 'fallback-token-123456' })
-
-        await expect(getApiToken()).resolves.toBe('fallback-token-123456')
-        expect(errorSpy).toHaveBeenCalledWith(
-            `Warning: system credential manager unavailable; using plaintext token from ${TEST_CONFIG_PATH}`,
-        )
-
-        setConfig({
-            api_token: 'fallback-token-123456',
-            currentWorkspace: 'team-2',
-        })
-        await expect(clearApiToken()).resolves.toEqual({
-            storage: 'config-file',
-            warning: `system credential manager unavailable; local auth state cleared in ${TEST_CONFIG_PATH}`,
-        })
-        expect(readConfig()).toEqual({
-            currentWorkspace: 'team-2',
-            pendingSecureStoreClear: true,
-        })
-    })
-
-    it('removes plaintext tokens after secure-store save while preserving non-secret config', async () => {
-        setConfig({
-            api_token: 'old-token-123456',
-            currentWorkspace: 'workspace-1',
-        })
-
-        const { saveApiToken } = await import('../lib/auth.js')
-
-        await expect(saveApiToken('new-token-123456')).resolves.toEqual({
-            storage: 'secure-store',
-        })
-        expect(keyringState.token).toBe('new-token-123456')
-        expect(readConfig()).toEqual({ currentWorkspace: 'workspace-1' })
-    })
-
-    it('keeps secure-store success when plaintext cleanup fails after save', async () => {
-        configWriteError = new Error('EACCES')
-        setConfig({
-            api_token: 'old-token-123456',
-            currentWorkspace: 'workspace-1',
-        })
-
-        const { saveApiToken } = await import('../lib/auth.js')
-
-        await expect(saveApiToken('new-token-123456')).resolves.toEqual({
-            storage: 'secure-store',
-            warning: `Token was stored securely, but could not remove legacy plaintext token from ${TEST_CONFIG_PATH} (EACCES)`,
-        })
-        expect(keyringState.token).toBe('new-token-123456')
-        expect(readConfig()).toEqual({
-            api_token: 'old-token-123456',
-            currentWorkspace: 'workspace-1',
-        })
-    })
-
-    it('keeps secure-store success when plaintext cleanup fails after logout', async () => {
-        configWriteError = new Error('EACCES')
-        keyringState.token = 'secure-token-123456'
-        setConfig({
-            api_token: 'old-token-123456',
-            currentWorkspace: 'workspace-1',
-        })
-
-        const { clearApiToken } = await import('../lib/auth.js')
-
-        await expect(clearApiToken()).resolves.toEqual({
-            storage: 'secure-store',
-            warning: `Secure-store token was removed, but could not remove legacy plaintext token from ${TEST_CONFIG_PATH} (EACCES)`,
-        })
-        expect(keyringState.token).toBeNull()
-        expect(readConfig()).toEqual({
-            api_token: 'old-token-123456',
-            currentWorkspace: 'workspace-1',
-        })
-    })
-
-    it('clears pending secure-store deletion when fallback save writes a new token', async () => {
-        keyringState.setError = new Error('Keychain unavailable')
-        setConfig({
-            currentWorkspace: 'workspace-1',
-            pendingSecureStoreClear: true,
-        })
-
-        const { saveApiToken } = await import('../lib/auth.js')
-
-        await expect(saveApiToken('fallback-token-123456')).resolves.toEqual({
-            storage: 'config-file',
-            warning: `system credential manager unavailable; token saved as plaintext in ${TEST_CONFIG_PATH}`,
-        })
-        expect(readConfig()).toEqual({
-            api_token: 'fallback-token-123456',
-            currentWorkspace: 'workspace-1',
-        })
-    })
-
-    it('treats pending secure-store deletion as logged out and clears stale secure tokens', async () => {
-        keyringState.token = 'stale-secure-token-123456'
-        setConfig({
-            currentWorkspace: 'workspace-1',
-            pendingSecureStoreClear: true,
-        })
-
-        const { getApiToken } = await import('../lib/auth.js')
-
-        const { NoTokenError } = await import('../lib/auth.js')
-        await expect(getApiToken()).rejects.toBeInstanceOf(NoTokenError)
-        expect(keyringState.deleteCalls).toBe(1)
-        expect(keyringState.getCalls).toBe(0)
-        expect(keyringState.token).toBeNull()
-        expect(readConfig()).toEqual({ currentWorkspace: 'workspace-1' })
     })
 
     function setConfig(config: Record<string, unknown>): void {

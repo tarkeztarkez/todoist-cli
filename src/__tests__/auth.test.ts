@@ -100,12 +100,18 @@ describe('auth command', () => {
             const program = createProgram()
             const token = 'some_token_123456789'
 
-            mockSaveApiToken.mockResolvedValue({ storage: 'secure-store' })
+            mockSaveApiToken.mockResolvedValue({
+                storage: 'secure-store',
+                account: 'test@example.com',
+            })
 
             await program.parseAsync(['node', 'td', 'auth', 'token', token])
 
-            expect(mockSaveApiToken).toHaveBeenCalledWith(token)
-            expect(consoleSpy).toHaveBeenCalledWith('✓', 'API token saved successfully!')
+            expect(mockSaveApiToken).toHaveBeenCalledWith(token, { setAsDefault: true })
+            expect(consoleSpy).toHaveBeenCalledWith(
+                '✓',
+                'API token saved successfully for test@example.com!',
+            )
             expect(consoleSpy).toHaveBeenCalledWith(
                 'Token stored securely in the system credential manager',
             )
@@ -121,7 +127,7 @@ describe('auth command', () => {
                 program.parseAsync(['node', 'td', 'auth', 'token', token]),
             ).rejects.toThrow('Permission denied')
 
-            expect(mockSaveApiToken).toHaveBeenCalledWith(token)
+            expect(mockSaveApiToken).toHaveBeenCalledWith(token, { setAsDefault: true })
         })
 
         it('trims whitespace from token', async () => {
@@ -129,11 +135,14 @@ describe('auth command', () => {
             const tokenWithWhitespace = '  some_token_123456789  '
             const expectedToken = 'some_token_123456789'
 
-            mockSaveApiToken.mockResolvedValue({ storage: 'secure-store' })
+            mockSaveApiToken.mockResolvedValue({
+                storage: 'secure-store',
+                account: 'test@example.com',
+            })
 
             await program.parseAsync(['node', 'td', 'auth', 'token', tokenWithWhitespace])
 
-            expect(mockSaveApiToken).toHaveBeenCalledWith(expectedToken)
+            expect(mockSaveApiToken).toHaveBeenCalledWith(expectedToken, { setAsDefault: true })
         })
 
         it('prompts interactively when no token argument given', async () => {
@@ -146,14 +155,19 @@ describe('auth command', () => {
                 _writeToOutput: vi.fn(),
             }
             mockCreateInterface.mockReturnValue(mockRl as unknown as Interface)
-            mockSaveApiToken.mockResolvedValue({ storage: 'secure-store' })
+            mockSaveApiToken.mockResolvedValue({
+                storage: 'secure-store',
+                account: 'test@example.com',
+            })
             const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
 
             await program.parseAsync(['node', 'td', 'auth', 'token'])
 
             expect(mockRl.question).toHaveBeenCalled()
             expect(mockRl.close).toHaveBeenCalled()
-            expect(mockSaveApiToken).toHaveBeenCalledWith('interactive_token_456')
+            expect(mockSaveApiToken).toHaveBeenCalledWith('interactive_token_456', {
+                setAsDefault: true,
+            })
             writeSpy.mockRestore()
         })
 
@@ -182,6 +196,7 @@ describe('auth command', () => {
 
             mockSaveApiToken.mockResolvedValue({
                 storage: 'config-file',
+                account: 'test@example.com',
                 warning:
                     'system credential manager unavailable; token saved as plaintext in /tmp/test-config.json',
             })
@@ -200,6 +215,7 @@ describe('auth command', () => {
 
             mockSaveApiToken.mockResolvedValue({
                 storage: 'secure-store',
+                account: 'test@example.com',
                 warning:
                     'Token was stored securely, but could not remove legacy plaintext token from /tmp/test-config.json (EACCES)',
             })
@@ -227,7 +243,10 @@ describe('auth command', () => {
                 cleanup: vi.fn(),
             })
             mockExchangeCodeForToken.mockResolvedValue(accessToken)
-            mockSaveApiToken.mockResolvedValue({ storage: 'secure-store' })
+            mockSaveApiToken.mockResolvedValue({
+                storage: 'secure-store',
+                account: 'test@example.com',
+            })
             mockOpen.mockResolvedValue({} as Awaited<ReturnType<typeof open>>)
 
             await program.parseAsync(['node', 'td', 'auth', 'login'])
@@ -235,8 +254,11 @@ describe('auth command', () => {
             expect(mockOpen).toHaveBeenCalledWith('https://todoist.com/oauth/authorize?test=1')
             expect(mockStartCallbackServer).toHaveBeenCalledWith('test_state')
             expect(mockExchangeCodeForToken).toHaveBeenCalledWith(authCode, 'test_code_verifier')
-            expect(mockSaveApiToken).toHaveBeenCalledWith(accessToken)
-            expect(consoleSpy).toHaveBeenCalledWith('✓', 'Successfully logged in!')
+            expect(mockSaveApiToken).toHaveBeenCalledWith(accessToken, { setAsDefault: true })
+            expect(consoleSpy).toHaveBeenCalledWith(
+                '✓',
+                'Successfully logged in as test@example.com!',
+            )
             expect(consoleSpy).toHaveBeenCalledWith(
                 'Token stored securely in the system credential manager',
             )
@@ -374,12 +396,15 @@ describe('auth command', () => {
     describe('logout subcommand', () => {
         it('clears the API token', async () => {
             const program = createProgram()
-            mockClearApiToken.mockResolvedValue({ storage: 'secure-store' })
+            mockClearApiToken.mockResolvedValue({
+                storage: 'secure-store',
+                account: 'test@example.com',
+            })
 
             await program.parseAsync(['node', 'td', 'auth', 'logout'])
 
             expect(mockClearApiToken).toHaveBeenCalled()
-            expect(consoleSpy).toHaveBeenCalledWith('✓', 'Logged out')
+            expect(consoleSpy).toHaveBeenCalledWith('✓', 'Logged out test@example.com')
             expect(consoleSpy).toHaveBeenCalledWith(
                 'Stored token removed from the system credential manager',
             )

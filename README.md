@@ -68,11 +68,29 @@ export TODOIST_API_TOKEN="your-token"
 
 `TODOIST_API_TOKEN` always takes priority over the stored token.
 
+### Multi-account setup
+
+Store multiple accounts and select one per invocation:
+
+```bash
+td multi-auth add personal@example.com "personal-token"
+td multi-auth add work@example.com "work-token"
+td multi-auth list
+td multi-auth default work@example.com
+td --account personal@example.com today
+td --account work@example.com project list
+```
+
+`td auth login` and `td auth token` now save the authenticated account and make it the default account.
+
 ### Auth commands
 
 ```bash
 td auth status   # check if authenticated
 td auth logout   # remove saved token
+td multi-auth list
+td multi-auth remove <email>
+td multi-auth default <email>
 ```
 
 ## Usage
